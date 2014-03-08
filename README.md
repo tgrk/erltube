@@ -1,7 +1,7 @@
 erltube
 =======
 
-An Erlang library for [Google Youtube API][1] v3. For more details see [documentation][1].
+An Erlang library for [Google Youtube API][1] v3.
 
 ## Fetch dependencies and compile
 
