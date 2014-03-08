@@ -1,0 +1,11 @@
+{application, erltube,
+   [{description, "Erlang library for Youtube API v3"},
+    {vsn, git},
+    {registered, []},
+    {applications, [stdlib,
+                    kernel
+                   ]},
+   {modules, []},
+   {env, [{verbose, false}]}
+   ]
+}.
