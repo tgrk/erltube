@@ -6,4 +6,4 @@ deps
 *.beam
 *.plt
 erl_crash.dump
-api.text
+api.txt
