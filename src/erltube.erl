@@ -16,8 +16,8 @@
          scope/1,
 
          get_channel/2,
+         update_channel/3,
          get_playlist/3,
-         is_valid_param/2,
 
          start/0,
          stop/0
@@ -68,14 +68,14 @@ scope(audit) ->
     "https://www.googleapis.com/auth/youtubepartner-channel-audit".
 
 get_channel(AccessToken, Params) ->
-    call_api(AccessToken, channel, Params).
+    call_api(get, AccessToken, channel_list, Params, []).
+
+update_channel(AccessToken, Params, Body) ->
+    call_api(put, AccessToken, channel_update, Params, Body).
 
 get_playlist(AccessToken, PlaylistId, Params) ->
     Params1 = [{playlistId, PlaylistId}] ++ Params,
-    call_api(AccessToken, playlist, Params1).
-
-is_valid_param(Resource, Params) ->
-    not lists:member(false, [validate_params(Resource, F) || F <- Params]).
+    call_api(get, AccessToken, playlist_list, Params1, []).
 
 start() ->
     [application:start(A) || A <- ?DEPS ++ [erltube]],
@@ -89,11 +89,12 @@ stop() ->
 %%%============================================================================
 %%% Internal functionality
 %%%============================================================================
-call_api(AccessToken, Resource, Params) ->
+call_api(Method, AccessToken, Resource, Params, Body) ->
     Headers = [{"Authorization", "Bearer " ++ AccessToken}],
-    case is_valid_param(Resource, Params) of
-        true ->
-            case http_request(get, get_url(Resource), Headers, Params) of
+    case check_params(Resource, Params) of
+        ok ->
+            Url = get_url(Resource),
+            case http_request(Method, Url, Headers, Params, Body) of
                 {200, Headers, Response} ->
                     {ok, Headers, parse_response(Response, json)};
                 {400, Headers, _} ->
@@ -103,33 +104,73 @@ call_api(AccessToken, Resource, Params) ->
                 {_Other, Headers, _Reason} ->
                     {error, Headers}
             end;
-        false ->
-            {error, {invalid_params, Params}}
+        Error ->
+            Error
     end.
 
-%%TODO: handle required, at least one param and optional params
-validate_params(channel, {part, Value}) ->
+check_params(Resource, Params) ->
+    Rules = get_resource_params(Resource),
+
+    %% check required params
+    Required = proplists:get_value(required, Rules, []),
+    R1 = [proplists:is_defined(K, Required) || {K,_V} <- Params],
+    case lists:member(false, R1) =:= false of
+        true ->
+            OneOrMore = proplists:get_value(one_or_more, Rules, []),
+            R2 = [proplists:is_defined(K, OneOrMore) || {K,_V} <- Params],
+            case lists:member(true, R2) =:= true of
+                true ->
+                    %% check types of params
+                    R3 = [validate_params(Resource, F) || F <- Params],
+                    case lists:member(false, R3) of
+                        false -> ok;
+                        true  -> {error, {invalid_param_types, Resource}}
+                    end;
+                false ->
+                    {error, {missing_required_params, Resource}}
+            end;
+        false ->
+          {error, {missing_required_params, Resource}}
+    end.
+
+get_resource_params(channel_list) ->
+    [{required,    [part]},
+     {one_or_more, [categoryId, forUsername, managedByMe, mine, mySubscribers]}
+    ];
+get_resource_params(channel_update) ->
+    [{required,    [part]}];
+get_resource_params(playlist_list) ->
+    [{required,   []},
+    {one_or_more, []}].
+
+validate_params(channel_list, {part, Value}) ->
     lists:member(Value, [snippet, auditDetails,
                          brandingSettings, contentDetails,
                          invideoPromotion, statistics,
                          status, topicDetails]);
-validate_params(channel, {id, Value}) when is_list(Value) ->
+validate_params(channel_list, {id, Value}) when is_list(Value) ->
     true;
-validate_params(channel, {categoryId, Value}) when is_list(Value) ->
+validate_params(channel_list, {categoryId, Value}) when is_list(Value) ->
     true;
-validate_params(channel, {forUsername, Value}) when is_list(Value) ->
+validate_params(channel_list, {forUsername, Value}) when is_list(Value) ->
     true;
-validate_params(channel, {managedByMe, Value}) when is_boolean(Value) ->
+validate_params(channel_list, {managedByMe, Value}) when is_boolean(Value) ->
     true;
-validate_params(channel, {mine, Value}) when is_boolean(Value) ->
+validate_params(channel_list, {mine, Value}) when is_boolean(Value) ->
     true;
-validate_params(channel, {mySubscribers, Value}) when is_boolean(Value) ->
+validate_params(channel_list, {mySubscribers, Value}) when is_boolean(Value) ->
     true;
-validate_params(channel, {maxResults, Value}) when is_integer(Value) ->
+validate_params(channel_list, {maxResults, Value}) when is_integer(Value) ->
     true;
-validate_params(channel, {onBehalfOfContentOwner, Value}) when is_list(Value) ->
+validate_params(channel_list, {onBehalfOfContentOwner, Value})
+  when is_list(Value) ->
     true;
-validate_params(channel, {pageToken, Value}) when is_list(Value) ->
+validate_params(channel_list, {pageToken, Value}) when is_list(Value) ->
+    true;
+validate_params(channel_update, {part, Value}) ->
+    lists:member(Value, [id, brandingSettings, invideoPromotion]);
+validate_params(channel_update, {onBehalfOfContentOwner, Value})
+  when is_list(Value) ->
     true;
 validate_params(_Resource, _Params) ->
     false.
@@ -152,10 +193,10 @@ http_request(post, Url, Params) ->
                       [{timeout, infinity}], []),
     {Status, Headers, Response}.
 
-http_request(get, BaseUrl, Headers, Params) ->
+http_request(Method, BaseUrl, Headers, Params, Body) ->
     Url = create_url(BaseUrl, Params),
     {ok, {{_, Status, _}, Headers, Response}} =
-        httpc:request(get, {Url, Headers}, [{timeout, infinity}], []),
+        httpc:request(Method, {Url, Headers}, [{timeout, infinity}], Body),
     {Status, Headers, Response}.
 
 create_url(BaseUrl, Params) ->
@@ -172,15 +213,18 @@ parse_param(Input) ->
     [Key, Value] = string:tokens(Input, "="),
     {list_to_atom(Key), Value}.
 
+%%FIXME: remove duplication
 get_url(request_token) ->
     ?URL_OAUTH ++ "auth";
 get_url(authorize_token) ->
     ?URL_OAUTH ++ "token";
 get_url(revoke_token) ->
     ?URL_OAUTH ++ "revoke";
-get_url(channel) ->
+get_url(channel_list) ->
     ?URL_API ++ "channels";
-get_url(playlist) ->
+get_url(channel_update) ->
+    ?URL_API ++ "channels";
+get_url(playlist_list) ->
     ?URL_API ++ "playlistItems".
 
 to_list(Value) when is_atom(Value) ->

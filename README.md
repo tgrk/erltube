@@ -12,7 +12,7 @@ $ rebar get-deps compile
 
 ## Quick start
 
-### Authentication using oAuth2
+### Authentication
 The Youtube API v3 uses implementation of oAuth 2.0 for authentiaction and access validation.
 This library provide helper functions to authorize your application.
 
@@ -20,11 +20,27 @@ This library provide helper functions to authorize your application.
 TODO
 ```
 
-#### General
+### General
 
-Validate API params:
+#### Channels
+Returns a collection of zero or more [channel][4] resources that match the request params:
 ```erlang
-true = erltube:is_valid_param(channel, [{id, "Foobar"}]).
+TODO
+```
+
+[Updates][5] a channel's metadata:
+```erlang
+TODO
+```
+
+#### Playlists
+```
+TODO
+```
+
+#### Upload
+```
+TODO
 ```
 
 ## Example
@@ -36,3 +52,5 @@ TODO
 [1]: https://developers.google.com/youtube/v3/
 [2]: https://github.com/davisp/jiffy
 [3]: https://developers.google.com/youtube/registering_an_application
+[4]: https://developers.google.com/youtube/v3/docs/channels/list
+[5]: https://developers.google.com/youtube/v3/docs/channels/update
