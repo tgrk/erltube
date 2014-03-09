@@ -14,7 +14,7 @@ $ rebar get-deps compile
 
 ### Authentication
 The Youtube API v3 uses implementation of oAuth 2.0 for authentiaction and access validation.
-This library provide helper functions to authorize your application.
+This library provide helper functions to [authorize][6] your application. Fist you neeed to [register][3] your application to get `client_id`, `redirect_uri` and `client_secrect`.
 
 ```
 TODO
@@ -54,3 +54,4 @@ TODO
 [3]: https://developers.google.com/youtube/registering_an_application
 [4]: https://developers.google.com/youtube/v3/docs/channels/list
 [5]: https://developers.google.com/youtube/v3/docs/channels/update
+[6]: https://developers.google.com/youtube/v3/guides/authentication
