@@ -32,13 +32,26 @@ Url = erltube:request_token(ClientKey, RedirectUri, Scope, false).
 Open resulting url in you browser, select account > rights and then manually copy provided code.
 
 #### Authorize token
+Assuming the user has granted access to your application and get authorization code that is used
+now to get authorized access token using following call:
 ```erlang
-TODO
+erltube:authorize_token(ClientKey, ClientSecret, RedirectUri, Code).
+{[{<<"access_token">>,
+   <<"ya29.AHES6ZTtm7SuokEB-RGtbBty9IIlNiP9-eNMMQKtXdMP3sfjL1Fc">>},
+  {<<"token_type">>,<<"Bearer">>},
+  {<<"expires_in">>,3600},
+  {<<"refresh_token">>,
+   <<"1/HKSmLFXzqP0leUihZp2xUt3-5wkU7Gmu2Os_eBnzw74">>}]}
 ```
+Your application should store both values in a secure, long-lived location that is accessible between different invocations of your application. The refresh token enables your application to obtain a new access token if the one that you have expires.
 
 #### Refresh token
+Access tokens periodically expire and, when that happens, need to be refreshed using:
 ```erlang
-TODO
+erltube:refresh_token(ClientKey, ClientSecret, RefreshToken).
+{[{<<"access_token">>,<<"1/fFAGRNJru1FTz70BzhT3Zg">>},
+  {<<"expires_in">>,3920},
+  {<<"token_type">>,<<"Bearer">>}]}
 ```
 
 ### General
