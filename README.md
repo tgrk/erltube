@@ -55,6 +55,7 @@ erltube:refresh_token(ClientKey, ClientSecret, RefreshToken).
 ```
 
 ### General
+After obtaining an `access_token` for a user, your application can use that token to submit authorized API requests on that user's behalf.
 
 #### Channels
 Returns a collection of zero or more [channel][4] resources that match the request params:
