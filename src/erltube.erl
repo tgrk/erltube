@@ -94,6 +94,11 @@ call_api(Method, AccessToken, Resource, Params, Body) ->
     case check_params(Resource, Params) of
         ok ->
             Url = get_url(Resource),
+            case config(verbose)of
+                true  -> io:format("erltube: url=~p, params=~p, body=~p~n",
+                                  [Url, Params, Body]);
+                false -> skip
+            end,
             case http_request(Method, Url, Headers, Params, Body) of
                 {200, Headers, Response} ->
                     {ok, Headers, parse_response(Response, json)};
@@ -110,27 +115,57 @@ call_api(Method, AccessToken, Resource, Params, Body) ->
 
 check_params(Resource, Params) ->
     Rules = get_resource_params(Resource),
-
-    %% check required params
-    Required = proplists:get_value(required, Rules, []),
-    R1 = [proplists:is_defined(K, Required) || {K,_V} <- Params],
-    case lists:member(false, R1) =:= false of
-        true ->
-            OneOrMore = proplists:get_value(one_or_more, Rules, []),
-            R2 = [proplists:is_defined(K, OneOrMore) || {K,_V} <- Params],
-            case lists:member(true, R2) =:= true of
-                true ->
-                    %% check types of params
-                    R3 = [validate_params(Resource, F) || F <- Params],
-                    case lists:member(false, R3) of
-                        false -> ok;
-                        true  -> {error, {invalid_param_types, Resource}}
-                    end;
-                false ->
-                    {error, {missing_required_params, Resource}}
+    case check_required_params(Resource, Rules, Params) of
+        ok ->
+            case check_one_or_more_params(Resource, Rules, Params) of
+                ok ->
+                    check_params_types(Resource, Params);
+                Error1 ->
+                    Error1
             end;
-        false ->
-          {error, {missing_required_params, Resource}}
+        Error ->
+            Error
+    end.
+
+check_params_types(Resource, Params) ->
+    WrongTypeParams = lists:filtermap(
+                        fun(Param) ->
+                                case validate_params(Resource, Param) of
+                                    true  -> false;
+                                    false -> {true, Param}
+                                end
+                        end, Params),
+    case length(WrongTypeParams) =:= 0 of
+        false -> ok;
+        true  -> {error, {invalid_param_types, Resource, WrongTypeParams}}
+    end.
+
+check_required_params(Resource, Rules, Params) ->
+    Required = proplists:get_value(required, Rules, []),
+    MissingParams = lists:filtermap(
+                      fun({K,_V}) ->
+                              case proplists:is_defined(K, Params) of
+                                  true  -> false;
+                                  false -> {true, K}
+                              end
+                      end, Required),
+    case length(MissingParams) =:= 0 of
+        true  -> ok;
+        false -> {error, {missing_required_params, Resource, MissingParams}}
+    end.
+
+check_one_or_more_params(Resource, Rules, Params) ->
+    OneOrMore = proplists:get_value(one_or_more, Rules, []),
+    MissingParams = lists:filtermap(
+                      fun({K,_V}) ->
+                              case proplists:is_defined(K, Params) of
+                                  true  -> false;
+                                  false -> {true, K}
+                              end
+                      end, OneOrMore),
+    case length(MissingParams) =:= 0 of
+        true  -> ok;
+        false -> {error, {missing_optional_params, Resource, MissingParams}}
     end.
 
 get_resource_params(channel_list) ->
@@ -183,20 +218,20 @@ parse_response(Response, json) ->
 http_request(get, BaseUrl, Params) ->
     Url = create_url(BaseUrl, Params),
     {ok, {{_, Status, _}, Headers, Response}} =
-        httpc:request(get, {Url, []}, [{timeout, infinity}], []),
+        httpc:request(get, {Url, []}, [{timeout, config(timeout)}], []),
     {Status, Headers, Response};
 http_request(post, Url, Params) ->
     Args = create_url_params(Params),
     {ok, {{_, Status, _}, Headers, Response}} =
         httpc:request(post,
                       {Url, [], "application/x-www-form-urlencoded", Args},
-                      [{timeout, infinity}], []),
+                      [{timeout, config(timeout)}], []),
     {Status, Headers, Response}.
 
 http_request(Method, BaseUrl, Headers, Params, Body) ->
     Url = create_url(BaseUrl, Params),
     {ok, {{_, Status, _}, Headers, Response}} =
-        httpc:request(Method, {Url, Headers}, [{timeout, infinity}], Body),
+        httpc:request(Method, {Url, Headers}, [{timeout, config(timeout)}], Body),
     {Status, Headers, Response}.
 
 create_url(BaseUrl, Params) ->
@@ -240,3 +275,7 @@ to_binary(Value) when is_list(Value) ->
     list_to_binary(Value);
 to_binary(Value) ->
     Value.
+
+config(Key) ->
+    {ok, Val} = application:get_env(erltube, Key),
+    Key.
