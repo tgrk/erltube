@@ -6,6 +6,8 @@
                     kernel
                    ]},
    {modules, []},
-   {env, [{verbose, false}]}
+   {env, [{verbose, false},
+          {timeout, infinity}
+         ]}
    ]
 }.
