@@ -42,8 +42,7 @@ test_oauth() ->
             ?assert(true);
         {400, _, ErrorResult} ->
             case jiffy:decode(ErrorResult) of
-                {[{<<"error">>,<<"invalid_grant">>},
-                   {<<"error_description">>,<<"Invalid code.">>}]} ->
+                {[{<<"error">>,<<"invalid_grant">>} | _]} ->
                     Url = request_token(Keys),
                     ?debugFmt("Open url ~p, paste code into api.txt file "
                               "and retry.", [Url]),
