@@ -7,6 +7,8 @@
 %%%----------------------------------------------------------------------------
 -module(erltube).
 
+-include_lib("eunit/include/eunit.hrl").
+
 %% API
 -export([request_token/3,
          request_token/4,
@@ -22,6 +24,10 @@
          start/0,
          stop/0
         ]).
+
+-ifdef(EUNIT).
+-export([normalize/1]).
+-endif.
 
 -define(DEPS, [crypto, asn1, public_key, ssl, inets, jiffy]).
 -define(URL_API, "https://www.googleapis.com/youtube/v3/").
@@ -94,20 +100,25 @@ call_api(Method, AccessToken, Resource, Params, Body) ->
     case check_params(Resource, Params) of
         ok ->
             Url = get_url(Resource),
-            case config(verbose)of
-                true  -> io:format("erltube: url=~p, params=~p, body=~p~n",
-                                  [Url, Params, Body]);
+
+            %% ?debugFmt("erltube", []),
+            %% ?debugFmt("-------------------------------------------------", []),
+            %% ?debugFmt("url=~p", [Url]),
+            %% ?debugFmt("params=~p",[Params]),
+            %% ?debugFmt("body=~p",[Body]),
+            %% ?debugFmt("-------------------------------------------------", []),
+            case config(verbose, true)of
+                true  -> ?debugFmt("erltube: url=~p, params=~p, body=~p~n",
+                                   [Url, Params, Body]);
                 false -> skip
             end,
+
             case http_request(Method, Url, Headers, Params, Body) of
-                {200, Headers, Response} ->
-                    {ok, Headers, parse_response(Response, json)};
-                {400, Headers, _} ->
-                    {error, {bad_request, Headers}};
-                {403, Headers, _} ->
-                    {error, {unauthorized, Headers}};
-                {_Other, Headers, _Reason} ->
-                    {error, Headers}
+                {200, ResponseHeaders, ResponseBody} ->
+                    {ok, ResponseHeaders, parse_response(ResponseBody, json)};
+                {Code, ResponseHeaders, ResponseBody} ->
+                    {error, {Code, ResponseHeaders,
+                             parse_response(ResponseBody, json)}}
             end;
         Error ->
             Error
@@ -136,14 +147,14 @@ check_params_types(Resource, Params) ->
                                 end
                         end, Params),
     case length(WrongTypeParams) =:= 0 of
-        false -> ok;
-        true  -> {error, {invalid_param_types, Resource, WrongTypeParams}}
+        true  -> ok;
+        false -> {error, {invalid_param_types, Resource, WrongTypeParams}}
     end.
 
 check_required_params(Resource, Rules, Params) ->
     Required = proplists:get_value(required, Rules, []),
     MissingParams = lists:filtermap(
-                      fun({K,_V}) ->
+                      fun(K) ->
                               case proplists:is_defined(K, Params) of
                                   true  -> false;
                                   false -> {true, K}
@@ -157,13 +168,13 @@ check_required_params(Resource, Rules, Params) ->
 check_one_or_more_params(Resource, Rules, Params) ->
     OneOrMore = proplists:get_value(one_or_more, Rules, []),
     MissingParams = lists:filtermap(
-                      fun({K,_V}) ->
+                      fun(K) ->
                               case proplists:is_defined(K, Params) of
                                   true  -> false;
                                   false -> {true, K}
                               end
                       end, OneOrMore),
-    case length(MissingParams) =:= 0 of
+    case length(MissingParams) =/= length(OneOrMore) of
         true  -> ok;
         false -> {error, {missing_optional_params, Resource, MissingParams}}
     end.
@@ -210,29 +221,51 @@ validate_params(channel_update, {onBehalfOfContentOwner, Value})
 validate_params(_Resource, _Params) ->
     false.
 
-parse_response(Response, params) ->
-    parse_params(Response);
-parse_response(Response, json) ->
-    jiffy:decode(to_binary(Response)).
+parse_response(Body, params) ->
+    parse_params(Body);
+parse_response(Body, json) ->
+    case config(use_maps) =:= true of
+        true  -> jiffy:decode(to_binary(Body), [return_maps]);
+        false -> jiffy:decode(to_binary(Body))
+    end.
+
+normalize(JsonStruct) ->
+    normalize(JsonStruct, []).
+
+normalize([], Acc) ->
+    lists:reverse(Acc);
+normalize([{PL}], Acc) ->
+    normalize(PL, Acc);
+normalize({[H | T]}, Acc) ->
+    normalize(T, lists:reverse(normalize_item(H, [])) ++ Acc);
+normalize([H | T], Acc) ->
+    normalize(T, lists:reverse(normalize_item(H, [])) ++ Acc).
+
+normalize_item({K,V}, Acc) ->
+    case is_list(V) of
+        true  -> [{K, normalize(V, Acc)} | Acc];
+        false -> [{K, V} | Acc]
+    end.
 
 http_request(get, BaseUrl, Params) ->
     Url = create_url(BaseUrl, Params),
-    {ok, {{_, Status, _}, Headers, Response}} =
+    {ok, {{_, Status, _}, ResponseHeaders, Body}} =
         httpc:request(get, {Url, []}, [{timeout, config(timeout)}], []),
-    {Status, Headers, Response};
+    {Status, ResponseHeaders, Body};
 http_request(post, Url, Params) ->
     Args = create_url_params(Params),
-    {ok, {{_, Status, _}, Headers, Response}} =
+    {ok, {{_, Status, _}, ResponseHeaders, ResponseBody}} =
         httpc:request(post,
                       {Url, [], "application/x-www-form-urlencoded", Args},
                       [{timeout, config(timeout)}], []),
-    {Status, Headers, Response}.
+    {Status, ResponseHeaders, ResponseBody}.
 
 http_request(Method, BaseUrl, Headers, Params, Body) ->
     Url = create_url(BaseUrl, Params),
-    {ok, {{_, Status, _}, Headers, Response}} =
-        httpc:request(Method, {Url, Headers}, [{timeout, config(timeout)}], Body),
-    {Status, Headers, Response}.
+    {ok, {{_, Status, _}, ResponseHeaders, ResponseBody}} =
+        httpc:request(Method, {Url, Headers},
+                      [{timeout, config(timeout)}], Body),
+    {Status, ResponseHeaders, ResponseBody}.
 
 create_url(BaseUrl, Params) ->
     BaseUrl ++ "?" ++ create_url_params(Params).
@@ -278,4 +311,7 @@ to_binary(Value) ->
 
 config(Key) ->
     {ok, Val} = application:get_env(erltube, Key),
-    Key.
+    Val.
+
+config(Key, Default) ->
+    application:get_env(erltube, Key, Default).
