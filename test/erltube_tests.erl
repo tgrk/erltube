@@ -19,7 +19,8 @@ erltube_test_() ->
      fun(_) -> erltube:stop() end,
      [
       {timeout, 100, {"Custom oAuth test", fun test_oauth/0}},
-      {timeout, 100, {"Get channel params", fun test_get_channel_params/0}}
+      {timeout, 100, {"Get channel params", fun test_get_channel_params/0}},
+      {timeout, 100, {"Test JSON normalize", fun test_normalize/0}}
      ]
     }.
 
@@ -36,8 +37,9 @@ test_oauth() ->
         {200, _, Body} ->
             {ResultPL} = jiffy:decode(Body),
             AccessToken = proplists:get_value(<<"access_token">>, ResultPL),
+            RefreshToken = proplists:get_value(<<"refresh_token">>, ResultPL),
             NewKeys = get_keys_struct(ClientKey, ClientSecret, RedirectUri,
-                                      Code, AccessToken),
+                                      Code, AccessToken, RefreshToken),
             write_api_keys(NewKeys),
             ?assert(true);
         {400, _, ErrorResult} ->
@@ -55,6 +57,48 @@ test_oauth() ->
 test_get_channel_params() ->
     ?assert(false).
 
+test_normalize() ->
+    Json = {[{<<"kind">>,<<"youtube#channelListResponse">>},
+             {<<"etag">>,
+              <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/dGwQU8rQXN8VuTZ6iBvTn21VR5Q\"">>},
+             {<<"pageInfo">>,
+              {[{<<"totalResults">>,1},{<<"resultsPerPage">>,1}]}},
+             {<<"items">>,
+              [{[{<<"kind">>,<<"youtube#channel">>},
+                 {<<"etag">>,
+                  <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/NLzlD5LyK1xvRB5TNwRwIBpZchU\"">>},
+                 {<<"id">>,<<"UCdbflKzqGacmZ5jNMXYATBA">>},
+                 {<<"contentDetails">>,
+                  {[{<<"relatedPlaylists">>,
+                     {[{<<"likes">>,<<"LLdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"favorites">>,<<"FLdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"uploads">>,<<"UUdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"watchHistory">>,<<"HLdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"watchLater">>,<<"WLdbflKzqGacmZ5jNMXYATBA">>}]}},
+                    {<<"googlePlusUserId">>,
+                     <<"113808654219311535066">>}]}}]}]}]},
+
+    ?assertEqual([{<<"kind">>,<<"youtube#channelListResponse">>},
+                  {<<"etag">>,
+                   <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/dGwQU8rQXN8VuTZ6iBvTn21VR5Q\"">>},
+                  {<<"pageInfo">>,
+                   [{<<"totalResults">>,1},{<<"resultsPerPage">>,1}]},
+                  {<<"items">>,
+                   [{<<"kind">>,<<"youtube#channel">>},
+                    {<<"etag">>,
+                     <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/NLzlD5LyK1xvRB5TNwRwIBpZchU\"">>},
+                    {<<"id">>,<<"UCdbflKzqGacmZ5jNMXYATBA">>},
+                    {<<"contentDetails">>,
+                     [{<<"relatedPlaylists">>,
+                       [{<<"likes">>,<<"LLdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"favorites">>,<<"FLdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"uploads">>,<<"UUdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"watchHistory">>,<<"HLdbflKzqGacmZ5jNMXYATBA">>},
+                        {<<"watchLater">>,<<"WLdbflKzqGacmZ5jNMXYATBA">>}]},
+                      {<<"googlePlusUserId">>,<<"113808654219311535066">>}]}]}],
+                 erltube:normalize(Json)
+                ).
+
 %%%============================================================================
 read_api_keys() ->
     case file:consult("../api.txt") of
@@ -65,13 +109,15 @@ read_api_keys() ->
 write_api_keys(PL) ->
     file:write_file("../api.txt", io_lib:format("~p.", [PL])).
 
-get_keys_struct(ClientKey, ClientSecret, RedirectUri, Code, AccessToken) ->
+get_keys_struct(ClientKey, ClientSecret, RedirectUri, Code, AccessToken,
+                RefreshToken) ->
     [
-     {client_id, ensure_list(ClientKey)},
+     {client_id,     ensure_list(ClientKey)},
      {client_secret, ensure_list(ClientSecret)},
-     {redirect_uri, ensure_list(RedirectUri)},
-     {code, ensure_list(Code)},
-     {access_token, ensure_list(AccessToken)}
+     {redirect_uri,  ensure_list(RedirectUri)},
+     {code,          ensure_list(Code)},
+     {access_token,  ensure_list(AccessToken)},
+     {refresh_token, ensure_list(RefreshToken)}
     ].
 
 request_token(Keys) ->
