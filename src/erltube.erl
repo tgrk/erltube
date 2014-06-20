@@ -241,11 +241,12 @@ normalize({[H | T]}, Acc) ->
 normalize([H | T], Acc) ->
     normalize(T, lists:reverse(normalize_item(H, [])) ++ Acc).
 
+normalize_item({K,{V}}, Acc) ->
+    [{K, normalize(V, Acc)} | Acc];
+normalize_item({K,V}, Acc) when is_list(V) ->
+    [{K, normalize(V, Acc)} | Acc];
 normalize_item({K,V}, Acc) ->
-    case is_list(V) of
-        true  -> [{K, normalize(V, Acc)} | Acc];
-        false -> [{K, V} | Acc]
-    end.
+    [{K, V} | Acc].
 
 http_request(get, BaseUrl, Params) ->
     Url = create_url(BaseUrl, Params),
