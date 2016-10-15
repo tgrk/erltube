@@ -10,26 +10,22 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% API
--export([request_token/3,
-         request_token/4,
-         authorize_token/4,
-         refresh_token/3,
-         revoke_token/1,
-         scope/1,
+-export([ request_token/3
+         , request_token/4
+         , authorize_token/4
+         , refresh_token/3
+         , revoke_token/1
+         , scope/1
 
-         get_channel/2,
-         update_channel/3,
-         get_playlist/3,
-
-         start/0,
-         stop/0
+         , get_channel/2
+         , update_channel/3
+         , get_playlist/3
         ]).
 
 -ifdef(EUNIT).
 -export([normalize/1]).
 -endif.
 
--define(DEPS, [crypto, asn1, public_key, ssl, inets, jiffy]).
 -define(URL_API, "https://www.googleapis.com/youtube/v3/").
 -define(URL_OAUTH, "https://accounts.google.com/o/oauth2/").
 
@@ -82,14 +78,6 @@ update_channel(AccessToken, Params, Body) ->
 get_playlist(AccessToken, PlaylistId, Params) ->
     Params1 = [{playlistId, PlaylistId}] ++ Params,
     call_api(get, AccessToken, playlist_list, Params1, []).
-
-start() ->
-    [application:start(A) || A <- ?DEPS ++ [erltube]],
-    ok.
-
-stop() ->
-    [application:stop(A) || A <- ?DEPS ++ [erltube]],
-    ok.
 
 
 %%%============================================================================
@@ -226,7 +214,7 @@ parse_response(Body, params) ->
 parse_response(Body, json) ->
     case config(use_maps) =:= true of
         true  -> jiffy:decode(to_binary(Body), [return_maps]);
-        false -> jiffy:decode(to_binary(Body))
+        false -> normalize(jiffy:decode(to_binary(Body)))
     end.
 
 normalize(JsonStruct) ->

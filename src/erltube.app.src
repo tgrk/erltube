@@ -3,12 +3,20 @@
     {vsn, git},
     {registered, []},
     {applications, [stdlib,
-                    kernel
+                    kernel,
+                    crypto,
+                    asn1,
+                    public_key,
+                    ssl,
+                    inets
                    ]},
    {modules, []},
    {env, [{verbose,  true},
           {timeout,  infinity},
           {use_maps, false}
-         ]}
+         ]},
+   {maintainers,["Martin Wiso"]},
+   {licenses,["MIT"]},
+   {links,[{"Github","https://github.com/tgrk/erltube"}]}
    ]
 }.
