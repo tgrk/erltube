@@ -7,3 +7,6 @@ deps
 *.plt
 erl_crash.dump
 api.txt
+_build/
+compile_commands.json
+rebar.lock
