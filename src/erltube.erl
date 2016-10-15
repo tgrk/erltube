@@ -1,5 +1,5 @@
 %%%----------------------------------------------------------------------------
-%%% @author Martin Wiso <tajgur@gmai.com>
+%%% @author Martin Wiso <tajgur@gmail.com>
 %%% @doc
 %%% Erlang library for Youtube v3 API
 %%% @end
