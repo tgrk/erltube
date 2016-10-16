@@ -20,7 +20,7 @@ This library provide helper functions to [authorize][6] your application. Fist y
 
 Start authoriation by requesting token based on your `client_id` and required [scope][6]:
 ```erlang
-Scope = "https://www.googleapis.com/auth/youtube.readonly",
+Scope = <<"https://www.googleapis.com/auth/youtube.readonly">>,
 erltube:request_token(ClientKey, RedirectUri, Scope, true).
 ```
 NOTE: By putting `true` as a last argument you indicate that requested code will be consumed by your endpoint. See [documenatation][6] for more details - section Handle response from Google.
@@ -60,7 +60,27 @@ After obtaining an `access_token` for a user, your application can use that toke
 #### Channels
 Returns a collection of zero or more [channel][4] resources that match the request params:
 ```erlang
-TODO
+AT = "access_token".
+{ok, _, Result} = erltube:get_channel(AT, [{part, contentDetails}, {mine, true}]).
+erltube:normalize(Result).
+[{<<"kind">>,<<"youtube#channelListResponse">>},
+ {<<"etag">>,
+  <<"foo">>},
+ {<<"pageInfo">>,
+  [{<<"totalResults">>,1},{<<"resultsPerPage">>,1}]},
+ {<<"items">>,
+  [{<<"kind">>,<<"youtube#channel">>},
+   {<<"etag">>,
+    <<"bar">>},
+   {<<"id">>,<<"abc">>},
+   {<<"contentDetails">>,
+    [{<<"relatedPlaylists">>,
+      [{<<"likes">>,<<"aaaa">>},
+       {<<"favorites">>,<<"bbbb">>},
+       {<<"uploads">>,<<"ccc">>},
+       {<<"watchHistory">>,<<"ddd">>},
+       {<<"watchLater">>,<<"eee">>}]},
+     {<<"googlePlusUserId">>,<<"fff">>}]}]}]
 ```
 
 [Updates][5] a channel's metadata:

@@ -11,9 +11,8 @@
                     inets
                    ]},
    {modules, []},
-   {env, [{verbose,  true},
-          {timeout,  infinity},
-          {use_maps, false}
+   {env, [{verbose, true},
+          {timeout, infinity}
          ]},
    {maintainers,["Martin Wiso"]},
    {licenses,["MIT"]},

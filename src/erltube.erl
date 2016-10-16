@@ -22,12 +22,19 @@
          , get_playlist/3
         ]).
 
--ifdef(EUNIT).
--export([normalize/1]).
+%% for testing only
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-export([to_binary/1]).
 -endif.
 
--define(URL_API, "https://www.googleapis.com/youtube/v3/").
--define(URL_OAUTH, "https://accounts.google.com/o/oauth2/").
+%% Types
+-type oauth_key()    :: binary().
+-type oauth_secret() :: binary().
+-export_type([oauth_key/0, oauth_secret/0]).
+
+-define(URL_API,   <<"https://www.googleapis.com/youtube/v3/">>).
+-define(URL_OAUTH, <<"https://accounts.google.com/o/oauth2/">>).
 
 %%%============================================================================
 %%% API
@@ -36,10 +43,11 @@ request_token(ClientKey, RedirectUri, Redirect) ->
     request_token(ClientKey, RedirectUri, scope(readonly), Redirect).
 
 request_token(ClientKey, RedirectUri, Scope, Redirect) ->
-    Params = [{client_id, ClientKey},
-              {redirect_uri, RedirectUri},
-              {response_type, code},
-              {scope, Scope}],
+    Params = #{client_id     => ClientKey,
+               redirect_uri  => RedirectUri,
+               response_type => code,
+               scope         => Scope
+              },
     BaseUrl = get_url(request_token),
     case Redirect of
         true  -> http_request(get, BaseUrl, Params);
@@ -47,27 +55,30 @@ request_token(ClientKey, RedirectUri, Scope, Redirect) ->
     end.
 
 authorize_token(ClientKey, ClientSecret, RedirectUri, Code) ->
-    Params = [{code, Code},
-              {client_id, ClientKey},
-              {client_secret, ClientSecret},
-              {redirect_uri, RedirectUri},
-              {grant_type, authorization_code}],
-    http_request(post, get_url(authorize_token), Params).
+    Params = #{code          => Code,
+               client_id     => ClientKey,
+               client_secret => ClientSecret,
+               redirect_uri  => RedirectUri,
+               grant_type    => authorization_code
+              },
+    call_api(post, authorize_token, Params).
 
 refresh_token(ClientKey, ClientSecret, RefreshToken) ->
-    Params = [{client_id, ClientKey},
-              {client_secret, ClientSecret},
-              {refresh_token, RefreshToken},
-              {grant_type, refresh_token}],
-    http_request(post, get_url(authorize_token), Params).
+    Params = #{client_id     => ClientKey,
+               client_secret => ClientSecret,
+               refresh_token => RefreshToken,
+               grant_type    => refresh_token
+              },
+    call_api(post, authorize_token, Params).
 
 revoke_token(Token) ->
-    http_request(get, get_url(revoke_token), [{token, Token}]).
+    http_request(get, get_url(revoke_token), #{token => Token}).
 
+-spec scope(readonly | audit) -> binary().
 scope(readonly) ->
-    "https://www.googleapis.com/auth/youtube.readonly";
+    <<"https://www.googleapis.com/auth/youtube.readonly">>;
 scope(audit) ->
-    "https://www.googleapis.com/auth/youtubepartner-channel-audit".
+    <<"https://www.googleapis.com/auth/youtubepartner-channel-audit">>.
 
 get_channel(AccessToken, Params) ->
     call_api(get, AccessToken, channel_list, Params, []).
@@ -76,13 +87,30 @@ update_channel(AccessToken, Params, Body) ->
     call_api(put, AccessToken, channel_update, Params, Body).
 
 get_playlist(AccessToken, PlaylistId, Params) ->
-    Params1 = [{playlistId, PlaylistId}] ++ Params,
+    Params1 = maps:merge(#{playlistId => PlaylistId}, Params),
     call_api(get, AccessToken, playlist_list, Params1, []).
-
 
 %%%============================================================================
 %%% Internal functionality
 %%%============================================================================
+call_api(post, Resource, Params) ->
+    Url = get_url(Resource),
+    case config(verbose, true)of
+        true  ->
+            error_logger:info_msg("erltube: url=~p, params=~p,~n",
+                                  [Url, Params]);
+        false ->
+            skip
+    end,
+
+    case http_request(post, Url, Params) of
+        {200, ResponseHeaders, ResponseBody} ->
+            {ok, ResponseHeaders, parse_response(ResponseBody, json)};
+        {Code, ResponseHeaders, ResponseBody} ->
+            {error, {Code, ResponseHeaders,
+                     parse_response(ResponseBody, json)}}
+    end.
+
 call_api(Method, AccessToken, Resource, Params, Body) ->
     Headers = [{"Authorization", "Bearer " ++ AccessToken}],
     case check_params(Resource, Params) of
@@ -96,9 +124,11 @@ call_api(Method, AccessToken, Resource, Params, Body) ->
             %% ?debugFmt("body=~p",[Body]),
             %% ?debugFmt("-------------------------------------------------", []),
             case config(verbose, true)of
-                true  -> ?debugFmt("erltube: url=~p, params=~p, body=~p~n",
-                                   [Url, Params, Body]);
-                false -> skip
+                true  ->
+                    error_logger:info_msg("erltube: url=~p, params=~p, body=~p~n",
+                                          [Url, Params, Body]);
+                false ->
+                    skip
             end,
 
             case http_request(Method, Url, Headers, Params, Body) of
@@ -127,83 +157,69 @@ check_params(Resource, Params) ->
     end.
 
 check_params_types(Resource, Params) ->
-    WrongTypeParams = lists:filtermap(
-                        fun(Param) ->
-                                case validate_params(Resource, Param) of
-                                    true  -> false;
-                                    false -> {true, Param}
-                                end
-                        end, Params),
+    ParamPred       = fun(Param) -> validate_params(Resource, Param) end,
+    WrongTypeParams = lists:filtermap(ParamPred, Params),
     case length(WrongTypeParams) =:= 0 of
         true  -> ok;
         false -> {error, {invalid_param_types, Resource, WrongTypeParams}}
     end.
 
 check_required_params(Resource, Rules, Params) ->
-    Required = proplists:get_value(required, Rules, []),
-    MissingParams = lists:filtermap(
-                      fun(K) ->
-                              case proplists:is_defined(K, Params) of
-                                  true  -> false;
-                                  false -> {true, K}
-                              end
-                      end, Required),
+    Required      = maps:get(required, Rules, #{}),
+    ParamPred     = fun(K) -> not maps:is_key(K, Params) end,
+    MissingParams = lists:filtermap(ParamPred, Required),
     case length(MissingParams) =:= 0 of
         true  -> ok;
         false -> {error, {missing_required_params, Resource, MissingParams}}
     end.
 
 check_one_or_more_params(Resource, Rules, Params) ->
-    OneOrMore = proplists:get_value(one_or_more, Rules, []),
-    MissingParams = lists:filtermap(
-                      fun(K) ->
-                              case proplists:is_defined(K, Params) of
-                                  true  -> false;
-                                  false -> {true, K}
-                              end
-                      end, OneOrMore),
+    OneOrMore     = maps:get(one_or_more, Rules, #{}),
+    ParamPred     = fun(K) -> not maps:is_key(K, Params) end,
+    MissingParams = lists:filtermap(ParamPred, OneOrMore),
     case length(MissingParams) =/= length(OneOrMore) of
         true  -> ok;
         false -> {error, {missing_optional_params, Resource, MissingParams}}
     end.
 
 get_resource_params(channel_list) ->
-    [{required,    [part]},
-     {one_or_more, [categoryId, forUsername, managedByMe, mine, mySubscribers]}
-    ];
+    #{required    => [part],
+      one_or_more => [categoryId, forUsername, managedByMe, mine, mySubscribers]
+     };
 get_resource_params(channel_update) ->
-    [{required,    [part]}];
+    #{required => [part]};
 get_resource_params(playlist_list) ->
-    [{required,   []},
-    {one_or_more, []}].
+    #{required    => [],
+      one_or_more => []
+     }.
 
-validate_params(channel_list, {part, Value}) ->
+validate_params(channel_list, #{part := Value}) ->
     lists:member(Value, [snippet, auditDetails,
                          brandingSettings, contentDetails,
                          invideoPromotion, statistics,
                          status, topicDetails]);
-validate_params(channel_list, {id, Value}) when is_list(Value) ->
+validate_params(channel_list, #{id := Value}) when is_list(Value) ->
     true;
-validate_params(channel_list, {categoryId, Value}) when is_list(Value) ->
+validate_params(channel_list, #{categoryId := Value}) when is_list(Value) ->
     true;
-validate_params(channel_list, {forUsername, Value}) when is_list(Value) ->
+validate_params(channel_list, #{forUsername := Value}) when is_list(Value) ->
     true;
-validate_params(channel_list, {managedByMe, Value}) when is_boolean(Value) ->
+validate_params(channel_list, #{managedByMe := Value}) when is_boolean(Value) ->
     true;
-validate_params(channel_list, {mine, Value}) when is_boolean(Value) ->
+validate_params(channel_list, #{mine := Value}) when is_boolean(Value) ->
     true;
-validate_params(channel_list, {mySubscribers, Value}) when is_boolean(Value) ->
+validate_params(channel_list, #{mySubscribers := Value}) when is_boolean(Value) ->
     true;
-validate_params(channel_list, {maxResults, Value}) when is_integer(Value) ->
+validate_params(channel_list, #{maxResults := Value}) when is_integer(Value) ->
     true;
-validate_params(channel_list, {onBehalfOfContentOwner, Value})
+validate_params(channel_list, #{onBehalfOfContentOwner := Value})
   when is_list(Value) ->
     true;
-validate_params(channel_list, {pageToken, Value}) when is_list(Value) ->
+validate_params(channel_list, #{pageToken := Value}) when is_list(Value) ->
     true;
-validate_params(channel_update, {part, Value}) ->
+validate_params(channel_update, #{part := Value}) ->
     lists:member(Value, [id, brandingSettings, invideoPromotion]);
-validate_params(channel_update, {onBehalfOfContentOwner, Value})
+validate_params(channel_update, #{onBehalfOfContentOwner := Value})
   when is_list(Value) ->
     true;
 validate_params(_Resource, _Params) ->
@@ -212,56 +228,36 @@ validate_params(_Resource, _Params) ->
 parse_response(Body, params) ->
     parse_params(Body);
 parse_response(Body, json) ->
-    case config(use_maps) =:= true of
-        true  -> jiffy:decode(to_binary(Body), [return_maps]);
-        false -> normalize(jiffy:decode(to_binary(Body)))
-    end.
-
-normalize(JsonStruct) ->
-    normalize(JsonStruct, []).
-
-normalize([], Acc) ->
-    lists:reverse(Acc);
-normalize([{PL}], Acc) ->
-    normalize(PL, Acc);
-normalize({[H | T]}, Acc) ->
-    normalize(T, lists:reverse(normalize_item(H, [])) ++ Acc);
-normalize([H | T], Acc) ->
-    normalize(T, lists:reverse(normalize_item(H, [])) ++ Acc).
-
-normalize_item({K,{V}}, Acc) ->
-    [{K, normalize(V, Acc)} | Acc];
-normalize_item({K,V}, Acc) when is_list(V) ->
-    [{K, normalize(V, Acc)} | Acc];
-normalize_item({K,V}, Acc) ->
-    [{K, V} | Acc].
+    jiffy:decode(to_binary(Body), [return_maps]).
 
 http_request(get, BaseUrl, Params) ->
     Url = create_url(BaseUrl, Params),
     {ok, {{_, Status, _}, ResponseHeaders, Body}} =
-        httpc:request(get, {Url, []}, [{timeout, config(timeout)}], []),
+        httpc:request(get, {to_list(Url), []}, [{timeout, config(timeout)}], []),
     {Status, ResponseHeaders, Body};
 http_request(post, Url, Params) ->
     Args = create_url_params(Params),
     {ok, {{_, Status, _}, ResponseHeaders, ResponseBody}} =
         httpc:request(post,
-                      {Url, [], "application/x-www-form-urlencoded", Args},
+                      {to_list(Url), [], "application/x-www-form-urlencoded", Args},
                       [{timeout, config(timeout)}], []),
     {Status, ResponseHeaders, ResponseBody}.
 
 http_request(Method, BaseUrl, Headers, Params, Body) ->
     Url = create_url(BaseUrl, Params),
     {ok, {{_, Status, _}, ResponseHeaders, ResponseBody}} =
-        httpc:request(Method, {Url, Headers},
+        httpc:request(Method, {to_list(Url), Headers},
                       [{timeout, config(timeout)}], Body),
     {Status, ResponseHeaders, ResponseBody}.
 
 create_url(BaseUrl, Params) ->
-    BaseUrl ++ "?" ++ create_url_params(Params).
+    <<(BaseUrl)/binary, "?", (create_url_params(Params))/binary>>.
 
+create_url_params(Params) when is_map(Params) ->
+    create_url_params(maps:to_list(Params));
 create_url_params(Params) ->
-    lists:flatmap(fun ({K,V}) -> to_list(K) ++ "=" ++ to_list(V) ++ "&" end,
-                  Params).
+    Parts = lists:map(fun ({K, V}) -> to_list(K) ++ "=" ++ to_list(V) end, Params),
+    to_binary(string:join(Parts,  "&")).
 
 parse_params(Input) ->
     lists:map(fun parse_param/1, string:tokens(Input, "&")).
@@ -272,17 +268,17 @@ parse_param(Input) ->
 
 %%FIXME: remove duplication
 get_url(request_token) ->
-    ?URL_OAUTH ++ "auth";
+    <<(?URL_OAUTH)/binary, "auth">>;
 get_url(authorize_token) ->
-    ?URL_OAUTH ++ "token";
+    <<(?URL_OAUTH)/binary, "token">>;
 get_url(revoke_token) ->
-    ?URL_OAUTH ++ "revoke";
+    <<(?URL_OAUTH)/binary, "revoke">>;
 get_url(channel_list) ->
-    ?URL_API ++ "channels";
+    <<(?URL_API)/binary, "channels">>;
 get_url(channel_update) ->
-    ?URL_API ++ "channels";
+    <<(?URL_API)/binary, "channels">>;
 get_url(playlist_list) ->
-    ?URL_API ++ "playlistItems".
+    <<(?URL_API)/binary, "playlistItems">>.
 
 to_list(Value) when is_atom(Value) ->
     atom_to_list(Value);

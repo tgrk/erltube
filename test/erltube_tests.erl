@@ -1,5 +1,5 @@
 %%%----------------------------------------------------------------------------
-%%% @author Martin Wiso <tajgur@gmai.com>
+%%% @author Martin Wiso <tajgur@gmail.com>
 %%% @doc
 %%% Erlang library for Youtube API v3
 %%% @end
@@ -11,40 +11,46 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(STORAGE, erltube).
 
 %% =============================================================================
 erltube_test_() ->
     {setup,
-     fun() -> erltube:start() end,
-     fun(_) -> erltube:stop() end,
+     fun() ->
+             {ok, _} = application:ensure_all_started(erltube),
+
+             %% for storing oAuth credentials and reusing them in other thest
+             _ = ets:new(?STORAGE, [set, named_table]),
+
+             ok
+     end,
+     fun(_) -> application:stop(erltube) end,
      [
-      {timeout, 100, {"Custom oAuth test", fun test_oauth/0}},
-      {timeout, 100, {"Get channel params", fun test_get_channel_params/0}},
-      {timeout, 100, {"Test JSON normalize", fun test_normalize/0}}
+        {timeout, 100, {"Custom oAuth test",  fun test_oauth/0}}
+      , {timeout, 100, {"Get channel params", fun test_get_channel_params/0}}
      ]
     }.
 
 %% =============================================================================
 test_oauth() ->
     Keys = read_api_keys(),
-    ClientKey = proplists:get_value(client_id, Keys),
-    ClientSecret = proplists:get_value(client_secret, Keys),
-    RedirectUri = proplists:get_value(redirect_uri, Keys),
-    Code = proplists:get_value(code, Keys),
+    ClientKey    = maps:get(client_id, Keys),
+    ClientSecret = maps:get(client_secret, Keys),
+    RedirectUri  = maps:get(redirect_uri, Keys),
+    Code         = maps:get(code, Keys),
 
-    case erltube:authorize_token(ClientKey, ClientSecret,
-                                 RedirectUri, Code) of
-        {200, _, Body} ->
-            {ResultPL} = jiffy:decode(Body),
-            AccessToken = proplists:get_value(<<"access_token">>, ResultPL),
-            RefreshToken = proplists:get_value(<<"refresh_token">>, ResultPL),
-            NewKeys = get_keys_struct(ClientKey, ClientSecret, RedirectUri,
-                                      Code, AccessToken, RefreshToken),
-            write_api_keys(NewKeys),
+    case erltube:authorize_token(ClientKey, ClientSecret, RedirectUri, Code) of
+        {ok, _Headers, Map} ->
+            %% store oAuth credentials for later use
+            AccessToken  = maps:get(<<"access_token">>, Map),
+            RefreshToken = maps:get(<<"refresh_token">>, Map),
+            ok = store_all(ClientKey, ClientSecret, RedirectUri,
+                           Code, AccessToken, RefreshToken),
             ?assert(true);
-        {400, _, ErrorResult} ->
-            case jiffy:decode(ErrorResult) of
-                {[{<<"error">>,<<"invalid_grant">>} | _]} ->
+        {error, {_ErrorCode, _ErrorHeaders, ErrorMap}} ->
+            ?debugFmt("debug: error_map=~p", [ErrorMap]),
+            case maps:get(<<"error">>, ErrorMap) of
+                <<"invalid_grant">> ->
                     Url = request_token(Keys),
                     ?debugFmt("Open url ~p, paste code into api.txt file "
                               "and retry.", [Url]),
@@ -57,75 +63,30 @@ test_oauth() ->
 test_get_channel_params() ->
     ?assert(false).
 
-test_normalize() ->
-    Json = {[{<<"kind">>,<<"youtube#channelListResponse">>},
-             {<<"etag">>,
-              <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/dGwQU8rQXN8VuTZ6iBvTn21VR5Q\"">>},
-             {<<"pageInfo">>,
-              {[{<<"totalResults">>,1},{<<"resultsPerPage">>,1}]}},
-             {<<"items">>,
-              [{[{<<"kind">>,<<"youtube#channel">>},
-                 {<<"etag">>,
-                  <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/NLzlD5LyK1xvRB5TNwRwIBpZchU\"">>},
-                 {<<"id">>,<<"UCdbflKzqGacmZ5jNMXYATBA">>},
-                 {<<"contentDetails">>,
-                  {[{<<"relatedPlaylists">>,
-                     {[{<<"likes">>,<<"LLdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"favorites">>,<<"FLdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"uploads">>,<<"UUdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"watchHistory">>,<<"HLdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"watchLater">>,<<"WLdbflKzqGacmZ5jNMXYATBA">>}]}},
-                    {<<"googlePlusUserId">>,
-                     <<"113808654219311535066">>}]}}]}]}]},
-
-    ?assertEqual([{<<"kind">>,<<"youtube#channelListResponse">>},
-                  {<<"etag">>,
-                   <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/dGwQU8rQXN8VuTZ6iBvTn21VR5Q\"">>},
-                  {<<"pageInfo">>,
-                   [{<<"totalResults">>,1},{<<"resultsPerPage">>,1}]},
-                  {<<"items">>,
-                   [{<<"kind">>,<<"youtube#channel">>},
-                    {<<"etag">>,
-                     <<"\"QVyS2yjpsZ-tKkk4JvgYeO_YkzY/NLzlD5LyK1xvRB5TNwRwIBpZchU\"">>},
-                    {<<"id">>,<<"UCdbflKzqGacmZ5jNMXYATBA">>},
-                    {<<"contentDetails">>,
-                     [{<<"relatedPlaylists">>,
-                       [{<<"likes">>,<<"LLdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"favorites">>,<<"FLdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"uploads">>,<<"UUdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"watchHistory">>,<<"HLdbflKzqGacmZ5jNMXYATBA">>},
-                        {<<"watchLater">>,<<"WLdbflKzqGacmZ5jNMXYATBA">>}]},
-                      {<<"googlePlusUserId">>,<<"113808654219311535066">>}]}]}],
-                 erltube:normalize(Json)
-                ).
-
 %%%============================================================================
+request_token(Keys) ->
+    ClientKey   = maps:get(client_id, Keys),
+    RedirectUri = maps:get(redirect_uri, Keys),
+    erltube:request_token(ClientKey, RedirectUri, false).
+
 read_api_keys() ->
-    case file:consult("../api.txt") of
+    case file:consult("api.txt") of
         {ok,[Keys]} -> Keys;
         _ -> throw("Unable to read credentials from api.txt file!")
     end.
 
-write_api_keys(PL) ->
-    file:write_file("../api.txt", io_lib:format("~p.", [PL])).
+%% Helpers for storing credentials
+store_all(ClientKey, ClientSecret, RedirectUri, Code, AccessToken, RefreshToken) ->
+    true = store({client_id,     erltube:to_binary(ClientKey)}),
+    true = store({client_secret, erltube:to_binary(ClientSecret)}),
+    true = store({redirect_uri,  erltube:to_binary(RedirectUri)}),
+    true = store({code,          erltube:to_binary(Code)}),
+    true = store({access_token,  erltube:to_binary(AccessToken)}),
+    true = store({refresh_token, erltube:to_binary(RefreshToken)}),
+    ok.
 
-get_keys_struct(ClientKey, ClientSecret, RedirectUri, Code, AccessToken,
-                RefreshToken) ->
-    [
-     {client_id,     ensure_list(ClientKey)},
-     {client_secret, ensure_list(ClientSecret)},
-     {redirect_uri,  ensure_list(RedirectUri)},
-     {code,          ensure_list(Code)},
-     {access_token,  ensure_list(AccessToken)},
-     {refresh_token, ensure_list(RefreshToken)}
-    ].
+store(Props) ->
+    ets:insert(?STORAGE, Props).
 
-request_token(Keys) ->
-    ClientKey = proplists:get_value(client_id, Keys),
-    RedirectUri = proplists:get_value(redirect_uri, Keys),
-    erltube:request_token(ClientKey, RedirectUri, false).
-
-ensure_list(Value) when is_binary(Value) ->
-    binary_to_list(Value);
-ensure_list(Value) ->
-    Value.
+lookup(Key) ->
+    ets:lookup(?STORAGE, Key).

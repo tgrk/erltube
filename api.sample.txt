@@ -1,6 +1,7 @@
-[{client_id, ""},
- {client_secret, ""},
- {redirect_uri, ""},
- {code, ""},
- {access_token, ""},
- {refresh_token, ""}].
+#{client_id     => <<>>,
+  client_secret => <<>>,
+  redirect_uri  => <<>>,
+  code          => <<>>,
+  access_token  => <<>>,
+  refresh_token => <<>>
+}.
